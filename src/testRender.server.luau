@@ -13,7 +13,7 @@ local editableImage = nil
 
 local dz = 1
 
-local fov = 120
+local fov = 70
 local angleY = 0
 local angleX = 0
 

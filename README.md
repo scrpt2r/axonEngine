@@ -1,4 +1,17 @@
-# axonEngine
+<h1 id="axonEngine" align="center">axonEngine</h1>
+<div align="center">
+    <img src="https://img.shields.io/badge/version-0.0.0-black" alt="Version">
+    <br/>
+    <a href="https://opensource.org/licenses/MIT">
+        <img src="https://img.shields.io/badge/License-MIT-red.svg" alt="License">
+    </a>
+    <img src="https://img.shields.io/badge/Language-Luau-3d5ef5?style=&logo=lua" alt="Luau">
+    <img src="https://img.shields.io/badge/Maintained%3F-Much%20As%20Possible-green.svg" alt="Luau">
+    <img src="https://img.shields.io/badge/Open%20Source-%E2%9D%A4-brightgreen" alt="Luau">
+</div>
+<div align="center">
+    CPU-side 3D software renderer built in Roblox Luau, from scratch.
+</div>
 
 A from-scratch graphics and game engine built in Roblox Luau — currently focused
 on a CPU-side 3D software rasterizer that renders onto a 2D EditableImage canvas,
