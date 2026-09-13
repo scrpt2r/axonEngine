@@ -2,7 +2,7 @@
 
 A from-scratch graphics and game engine built in Roblox Luau — currently focused
 on a CPU-side 3D software rasterizer that renders onto a 2D EditableImage canvas,
-with the long-term goal of growing into a full game engine.
+with the long-term goal of growing into a full game engine with comprehensive graphics engine.
 
 ## What this is
 
