@@ -1,0 +1,12 @@
+{
+  "name": "axonEngine",
+  "tree": {
+    "$className": "DataModel",
+
+    "ServerScriptService": {
+      "Server": {
+        "$path": "src"
+      }
+    }
+  }
+}
