@@ -10,7 +10,7 @@
     <img src="https://img.shields.io/badge/Open%20Source-%E2%9D%A4-brightgreen" alt="Luau">
 </div>
 <div align="center">
-    CPU-side 3D software renderer built in Roblox Luau, from scratch.
+    
 </div>
 
 A from-scratch graphics and game engine built in Roblox Luau — currently focused
