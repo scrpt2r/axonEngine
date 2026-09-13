@@ -67,13 +67,13 @@ const FACES = {
 }
 
 const FACE_COLORS = {
-	Color3.new(1, 0, 0),
-	Color3.new(1, 0, 1),
-	Color3.new(0, 0, 1),
+	Color3.fromRGB(255, 0, 0),
+	Color3.fromRGB(255, 0, 255),
+	Color3.fromRGB(0, 0, 255),
 
-	Color3.new(0, 1, 0),
-	Color3.new(1, 1, 0),
-	Color3.new(0, 1, 1),
+	Color3.fromRGB(0, 255, 0),
+	Color3.fromRGB(255, 255, 0),
+	Color3.fromRGB(0, 0, 0),
 
 	--[[
 	1 = front,
@@ -281,26 +281,53 @@ function translateZ(vect: Vector3, dz: number): Vector3
 end
 
 --stylua: ignore
-function rotateXZPlane(vect: Vector3, angle: number): Vector3
+function createRotationMatrixY(angle: number): {number}
 	local cos = math.cos(angle)
 	local sin = math.sin(angle)
 
-	return Vector3.new(
-		vect.X * cos - vect.Z * sin, 
-		vect.Y, 
-		vect.X * sin + vect.Z * cos
-	)
+	return {
+		cos,  0, sin,
+		0, 	  1,   0,
+		-sin, 0, cos
+	}
 end
 
 --stylua: ignore
-function rotateYZPlane(vect: Vector3, angle: number): Vector3
+function createRotationMatrixX(angle: number): {number}
 	local cos = math.cos(angle)
 	local sin = math.sin(angle)
 
+	return {
+		1,    0,    0,
+		0, 	cos, -sin,
+		0,  sin,  cos
+	}
+end
+
+function multiplyMatrixes(matrisA: { number }, matrisB: { number }): { number }
+	local finalMatris = {}
+
+	for i = 1, 3 do
+		for j = 1, 3 do
+			local total = 0
+
+			for k = 1, 3 do
+				total += (matrisA[(i - 1) * 3 + k] * matrisB[(k - 1) * 3 + j])
+			end
+
+			finalMatris[(i - 1) * 3 + j] = total
+		end
+	end
+
+	return finalMatris
+end
+
+--stylua: ignore
+function applyMatrisToVector(matris: {number}, vect: Vector3): Vector3
 	return Vector3.new(
-		vect.X, 
-		vect.Y * cos - vect.Z * sin, 
-		vect.Y * sin + vect.Z * cos
+		(matris[1] * vect.X) + (matris[2] * vect.Y) + (matris[3] * vect.Z),
+		(matris[4] * vect.X) + (matris[5] * vect.Y) + (matris[6] * vect.Z),
+		(matris[7] * vect.X) + (matris[8] * vect.Y) + (matris[9] * vect.Z)
 	)
 end
 
@@ -319,10 +346,14 @@ conn = runService.Heartbeat:Connect(function(dt: number)
 	angleY += delta.X * dt
 	angleX += delta.Y * dt
 
+	local matrisX = createRotationMatrixX(angleX)
+	local matrisY = createRotationMatrixY(angleY)
+	local multipliedRotation = multiplyMatrixes(matrisX, matrisY)
+
 	setup()
 
 	for i, v in VERTICIES do
-		local rotated = rotateYZPlane(rotateXZPlane(v, angleY), -angleX)
+		local rotated = applyMatrisToVector(multipliedRotation, v)
 		local translated = translateZ(rotated, dz)
 		local projected = project(translated)
 		local screened = screen(projected)
