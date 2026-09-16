@@ -1,5 +1,6 @@
 --!native
 --!strict
+--!optimize 2
 
 --// Services
 local assetService = game:GetService("AssetService")
@@ -28,6 +29,7 @@ const SIZE = Vector2.new(800, 800)
 const RECTANGLE_FILL_TYPE = Enum.ImageCombineType.Overwrite
 const LINE_ANTI_ALIASING = Enum.AntiAliasing.Enabled
 const FILL_COLOR = Color3.new(0, 0, 0)
+const NEAR_CLIPPING = 0.5
 
 const VERTICIES = {
 	Vector3.new(0.25, 0.25, 0.25),
@@ -115,6 +117,17 @@ function isBack(vect1: Vector2, vect2: Vector2, vect3: Vector2): boolean
 	return (crossProduct <= 0)
 end
 
+function _writeColorToBuffer(buf: buffer, color: Color3, size: Vector2)
+	for i = 1, size.X * size.Y do
+		local pixelIndex = (i - 1) * 4
+
+		buffer.writeu8(buf, pixelIndex, math.floor(color.R * 255))
+		buffer.writeu8(buf, pixelIndex + 1, math.floor(color.G * 255))
+		buffer.writeu8(buf, pixelIndex + 2, math.floor(color.B * 255))
+		buffer.writeu8(buf, pixelIndex + 3, 255)
+	end
+end
+
 --stylua: ignore
 function screen(pointVect: Vector2): Vector2
 	return Vector2.new(
@@ -183,6 +196,48 @@ function _line(pointVect1: Vector2, pointVect2: Vector2)
 	end
 
 	editableImage:DrawLine(pointVect1, pointVect2, FILL_COLOR, 0, RECTANGLE_FILL_TYPE, LINE_ANTI_ALIASING)
+end
+
+function clipFaceAgainstNear(vertexList: { Vector3 }): { Vector3 }
+	local finalVetreses = {}
+	local n = #vertexList
+
+	for k = 1, n do
+		local A = vertexList[k]
+		local B = vertexList[(k % n) + 1]
+
+		local isSafeA = (A.Z >= NEAR_CLIPPING)
+		local isSafeB = (B.Z >= NEAR_CLIPPING)
+
+		if isSafeA and isSafeB then
+			table.insert(finalVetreses, B)
+			continue
+		end
+
+		if isSafeA and not isSafeB then
+			local t = (NEAR_CLIPPING - A.Z) / (B.Z - A.Z)
+
+			local interpolation = Vector3.new(A.X + t * (B.X - A.X), A.Y + t * (B.Y - A.Y), NEAR_CLIPPING)
+
+			table.insert(finalVetreses, interpolation)
+			continue
+		end
+
+		if not isSafeA and isSafeB then
+			local t = (NEAR_CLIPPING - A.Z) / (B.Z - A.Z)
+
+			local interpolation = Vector3.new(A.X + t * (B.X - A.X), A.Y + t * (B.Y - A.Y), NEAR_CLIPPING)
+
+			table.insert(finalVetreses, interpolation)
+			continue
+		end
+
+		if not isSafeA and not isSafeB then
+			continue
+		end
+	end
+
+	return finalVetreses
 end
 
 function drawRect(vect1: Vector2, vect2: Vector2, vect3: Vector2, vect4: Vector2, faceDepth: number, color: Color3)
@@ -258,9 +313,19 @@ function drawRect(vect1: Vector2, vect2: Vector2, vect3: Vector2, vect4: Vector2
 		end
 
 		local width = math.abs(maxInterpolate - minInterpolate)
+		--width = math.floor(width)
+
 		if width < 1 then
 			width = 1
 		end
+
+		--[[
+		local size = Vector2.new(width, 1)
+		local buf = buffer.create(size.X * size.Y * 4)
+
+		writeColorToBuffer(buf, color, size)
+		editableImage:WritePixelsBuffer(Vector2.new(minInterpolate, scanY), size, buf)
+]]
 
 		editableImage:DrawRectangle(
 			Vector2.new(minInterpolate, scanY),
@@ -343,6 +408,7 @@ conn = runService.Heartbeat:Connect(function(dt: number)
 
 	local delta = getDelta()
 
+	fov = math.clamp(fov, 70, 120)
 	angleY += delta.X * dt
 	angleX += delta.Y * dt
 
@@ -373,18 +439,34 @@ conn = runService.Heartbeat:Connect(function(dt: number)
 	--end
 
 	for i, face in FACES do
-		local vect1 = projectedVerticies[face[1]]
-		local vect2 = projectedVerticies[face[2]]
-		local vect3 = projectedVerticies[face[3]]
+		local mainViewVertex = { viewSpace[face[1]], viewSpace[face[2]], viewSpace[face[3]], viewSpace[face[4]] }
+		local clippedVertexes = clipFaceAgainstNear(mainViewVertex)
+		local clippedVertexesScreen = {}
+
+		if #clippedVertexes < 3 then
+			continue
+		end
+
+		for i, v in clippedVertexes do
+			local fixed = screen(project(v))
+			table.insert(clippedVertexesScreen, fixed)
+		end
+
+		local vect1 = clippedVertexesScreen[1]
+		local vect2 = clippedVertexesScreen[2]
+		local vect3 = clippedVertexesScreen[3]
 
 		if isBack(vect1, vect2, vect3) then
 			continue
 		end
 
-		local faceDepth = (viewSpace[face[1]].Z + viewSpace[face[2]].Z + viewSpace[face[3]].Z + viewSpace[face[4]].Z)
+		local faceDepth = (clippedVertexes[1].Z + clippedVertexes[2].Z + clippedVertexes[3].Z + clippedVertexes[4].Z)
 			/ 4
 
-		table.insert(faceSorted, { index = i, depth = faceDepth })
+		table.insert(
+			faceSorted,
+			{ index = i, depth = faceDepth, color = FACE_COLORS[i], vertices = clippedVertexesScreen }
+		)
 	end
 
 	table.sort(faceSorted, function(a: { index: number, depth: number }, b: { index: number, depth: number })
@@ -392,14 +474,14 @@ conn = runService.Heartbeat:Connect(function(dt: number)
 	end)
 
 	for i, v in faceSorted do
-		local face = FACES[v.index]
-		local color = FACE_COLORS[v.index]
+		local color = v.color
 		local depth = v.depth
+		local vertices = v.vertices
 
-		local vect1 = projectedVerticies[face[1]]
-		local vect2 = projectedVerticies[face[2]]
-		local vect3 = projectedVerticies[face[3]]
-		local vect4 = projectedVerticies[face[4]]
+		local vect1 = vertices[1]
+		local vect2 = vertices[2]
+		local vect3 = vertices[3]
+		local vect4 = vertices[4]
 
 		drawRect(vect1, vect2, vect3, vect4, depth, color)
 	end
