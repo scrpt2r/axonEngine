@@ -32,8 +32,9 @@ visibility, depth ordering, and rasterization.
 
 ## Current features
 
+- Near-plane clipping
 - Perspective projection with configurable FOV and aspect ratio correction
-- 3D rotation (Euler-based, X/Y plane rotation) driven by mouse input
+- Matrix-based transforms (replacing manual per-axis rotation functions) driven by mouse input
 - Backface culling via 2D cross product / winding order
 - Painter's algorithm for depth sorting (view-space Z averaging per face)
 - Scanline polygon fill (custom rasterizer, no built-in triangle/polygon draw
@@ -41,8 +42,6 @@ visibility, depth ordering, and rasterization.
 
 ## Roadmap / planned
 
-- Matrix-based transforms (replacing manual per-axis rotation functions)
-- Near-plane clipping
 - Z-buffer depth testing (for non-convex geometry and multiple objects)
 - Move from Euler angles toward quaternions (avoiding gimbal lock)
 - Expand from a single test cube into a broader scene/object system
