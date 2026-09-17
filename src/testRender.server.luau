@@ -12,7 +12,7 @@ local userInputService = game:GetService("UserInputService")
 local imageLabel = starterGui:WaitForChild("render"):WaitForChild("ImageLabel")
 local editableImage = nil
 
-local dz = 1
+local dx, dy, dz = 0, 0, 1
 
 local fov = 70
 local angleY = 0
@@ -26,17 +26,20 @@ local oldPos = userInputService:GetMouseLocation()
 
 --// Constants
 const SIZE = Vector2.new(800, 800)
+const NEAR_CLIPPING = 0.45
+
 const RECTANGLE_FILL_TYPE = Enum.ImageCombineType.Overwrite
 const LINE_ANTI_ALIASING = Enum.AntiAliasing.Enabled
 const FILL_COLOR = Color3.new(0, 0, 0)
-const NEAR_CLIPPING = 0.5
+
+const LIGHT_DIRECTION = Vector3.new(0, 1, -1)
+const AMBIENT_LIGHT = 0.2
 
 const VERTICIES = {
 	Vector3.new(0.25, 0.25, 0.25),
 	Vector3.new(-0.25, 0.25, 0.25),
 	Vector3.new(-0.25, -0.25, 0.25),
 	Vector3.new(0.25, -0.25, 0.25),
-
 	Vector3.new(0.25, 0.25, -0.25),
 	Vector3.new(-0.25, 0.25, -0.25),
 	Vector3.new(-0.25, -0.25, -0.25),
@@ -45,9 +48,9 @@ const VERTICIES = {
 
 --stylua: ignore
 const _EDGES = {
-	{ 1, 2 }, { 2, 3 }, { 3, 4 }, { 4, 1 },
-	{ 5, 6 }, { 6, 7 }, { 7, 8 }, { 8, 5 },
-	{ 1, 5 }, { 2, 6 }, { 3, 7 }, { 4, 8 },
+    { 1, 2 }, { 2, 3 }, { 3, 4 }, { 4, 1 },
+    { 5, 6 }, { 6, 7 }, { 7, 8 }, { 8, 5 },
+    { 1, 5 }, { 2, 6 }, { 3, 7 }, { 4, 8 },
 }
 
 const FACES = {
@@ -57,34 +60,15 @@ const FACES = {
 	{ 4, 3, 7, 8 },
 	{ 1, 4, 8, 5 },
 	{ 2, 6, 7, 3 },
-
-	--[[
-	1 = front,
-	2 = back,
-	3 = top,
-	4 = bottom,
-	5 = right,
-	6 = left
-	]]
 }
 
 const FACE_COLORS = {
 	Color3.fromRGB(255, 0, 0),
 	Color3.fromRGB(255, 0, 255),
 	Color3.fromRGB(0, 0, 255),
-
 	Color3.fromRGB(0, 255, 0),
 	Color3.fromRGB(255, 255, 0),
-	Color3.fromRGB(0, 0, 0),
-
-	--[[
-	1 = front,
-	2 = back,
-	3 = top,
-	4 = bottom,
-	5 = right,
-	6 = left
-	]]
+	Color3.fromRGB(200, 200, 200),
 }
 
 --// Functions
@@ -114,6 +98,7 @@ end
 
 function isBack(vect1: Vector2, vect2: Vector2, vect3: Vector2): boolean
 	local crossProduct = (vect2.X - vect1.X) * (vect3.Y - vect1.Y) - (vect2.Y - vect1.Y) * (vect3.X - vect1.X)
+
 	return (crossProduct <= 0)
 end
 
@@ -157,7 +142,7 @@ function getFocalAspectAsync(): Vector2
 	)
 end
 
-function getDelta(): Vector2
+function _getDelta(): Vector2
 	local mousePos = userInputService:GetMouseLocation()
 	local delta = (mousePos - oldPos)
 
@@ -217,9 +202,9 @@ function clipFaceAgainstNear(vertexList: { Vector3 }): { Vector3 }
 		if isSafeA and not isSafeB then
 			local t = (NEAR_CLIPPING - A.Z) / (B.Z - A.Z)
 
-			local interpolation = Vector3.new(A.X + t * (B.X - A.X), A.Y + t * (B.Y - A.Y), NEAR_CLIPPING)
+			local intersaction = Vector3.new(A.X + t * (B.X - A.X), A.Y + t * (B.Y - A.Y), NEAR_CLIPPING)
 
-			table.insert(finalVetreses, interpolation)
+			table.insert(finalVetreses, intersaction)
 			continue
 		end
 
@@ -229,6 +214,7 @@ function clipFaceAgainstNear(vertexList: { Vector3 }): { Vector3 }
 			local interpolation = Vector3.new(A.X + t * (B.X - A.X), A.Y + t * (B.Y - A.Y), NEAR_CLIPPING)
 
 			table.insert(finalVetreses, interpolation)
+			table.insert(finalVetreses, B)
 			continue
 		end
 
@@ -240,64 +226,47 @@ function clipFaceAgainstNear(vertexList: { Vector3 }): { Vector3 }
 	return finalVetreses
 end
 
-function drawRect(vect1: Vector2, vect2: Vector2, vect3: Vector2, vect4: Vector2, faceDepth: number, color: Color3)
+function drawRect(vertices: { Vector2 }, faceDepth: number, color: Color3)
 	if not editableImage then
 		return
 	end
 
-	--[[
-	local minX = math.min(vect1.X, vect2.X, vect3.X, vect4.X)
-	local maxX = math.max(vect1.X, vect2.X, vect3.X, vect4.X)
-	]]
+	local n = #vertices
+	if n < 3 then
+		return
+	end
 
-	local minY = math.min(vect1.Y, vect2.Y, vect3.Y, vect4.Y)
-	local maxY = math.max(vect1.Y, vect2.Y, vect3.Y, vect4.Y)
+	local minY = math.huge
+	local maxY = -math.huge
 
-	for scanY = minY, maxY do -- ceil, floor
+	for i = 1, n do
+		local y = vertices[i].Y
+
+		if y < minY then
+			minY = y
+		end
+
+		if y > maxY then
+			maxY = y
+		end
+	end
+
+	for scanY = minY, maxY do
 		local interpolitied = {}
 
-		local A1, B4 = vect1, vect1
-		local B1, A2 = vect2, vect2
-		local B2, A3 = vect3, vect3
-		local B3, A4 = vect4, vect4
+		for k = 1, n do
+			local A = vertices[k]
+			local B = vertices[(k % n) + 1]
 
-		local smallY1 = math.min(A1.Y, B1.Y)
-		local bigY1 = math.max(A1.Y, B1.Y)
+			local smallY = math.min(A.Y, B.Y)
+			local bigY = math.max(A.Y, B.Y)
 
-		local smallY2 = math.min(A2.Y, B2.Y)
-		local bigY2 = math.max(A2.Y, B2.Y)
+			if scanY < smallY or scanY > bigY or B.Y == A.Y then
+				continue
+			end
 
-		local smallY3 = math.min(A3.Y, B3.Y)
-		local bigY3 = math.max(A3.Y, B3.Y)
-
-		local smallY4 = math.min(A4.Y, B4.Y)
-		local bigY4 = math.max(A4.Y, B4.Y)
-
-		if scanY >= smallY1 and scanY <= bigY1 then
-			local t = (scanY - A1.Y) / (B1.Y - A1.Y)
-			local interpolatedX = A1.X + t * (B1.X - A1.X)
-
-			table.insert(interpolitied, interpolatedX)
-		end
-
-		if scanY >= smallY2 and scanY <= bigY2 then
-			local t = (scanY - A2.Y) / (B2.Y - A2.Y)
-			local interpolatedX = A2.X + t * (B2.X - A2.X)
-
-			table.insert(interpolitied, interpolatedX)
-		end
-
-		if scanY >= smallY3 and scanY <= bigY3 then
-			local t = (scanY - A3.Y) / (B3.Y - A3.Y)
-			local interpolatedX = A3.X + t * (B3.X - A3.X)
-
-			table.insert(interpolitied, interpolatedX)
-		end
-
-		if scanY >= smallY4 and scanY <= bigY4 then
-			local t = (scanY - A4.Y) / (B4.Y - A4.Y)
-			local interpolatedX = A4.X + t * (B4.X - A4.X)
-
+			local t = (scanY - A.Y) / (B.Y - A.Y)
+			local interpolatedX = A.X + t * (B.X - A.X)
 			table.insert(interpolitied, interpolatedX)
 		end
 
@@ -313,34 +282,55 @@ function drawRect(vect1: Vector2, vect2: Vector2, vect3: Vector2, vect4: Vector2
 		end
 
 		local width = math.abs(maxInterpolate - minInterpolate)
-		--width = math.floor(width)
-
 		if width < 1 then
 			width = 1
 		end
 
-		--[[
-		local size = Vector2.new(width, 1)
-		local buf = buffer.create(size.X * size.Y * 4)
+		local maxAllowedX = math.max(SIZE.X - width, 0)
+		local safeX = math.clamp(minInterpolate, 0, maxAllowedX)
+		local safeY = math.clamp(scanY, 0, SIZE.Y - 1)
 
-		writeColorToBuffer(buf, color, size)
-		editableImage:WritePixelsBuffer(Vector2.new(minInterpolate, scanY), size, buf)
-]]
+		editableImage:DrawRectangle(Vector2.new(safeX, safeY), Vector2.new(width, 1), color, 0, RECTANGLE_FILL_TYPE)
+	end
+end
 
-		editableImage:DrawRectangle(
-			Vector2.new(minInterpolate, scanY),
-			Vector2.new(width, 1),
-			color,
-			0,
-			RECTANGLE_FILL_TYPE
-		)
+function autoFixWindingOrder(vertices: { Vector3 }, faces: { { number } })
+	local center = Vector3.new(0, 0, 0)
+	for _, v in vertices do
+		center += v
+	end
+	center /= #vertices
+
+	for i, face in faces do
+		local v1 = vertices[face[1]]
+		local v2 = vertices[face[2]]
+		local v3 = vertices[face[3]]
+
+		local edge1 = v2 - v1
+		local edge2 = v3 - v1
+		local normal = edge1:Cross(edge2)
+
+		local dirFromCenter = v1 - center
+
+		if normal:Dot(dirFromCenter) >= 0 then
+			continue
+		end
+
+		local fixedFace = {}
+
+		for j = #face, 1, -1 do
+			table.insert(fixedFace, face[j])
+		end
+
+		faces[i] = fixedFace
 	end
 end
 
 --stylua: ignore
-function translateZ(vect: Vector3, dz: number): Vector3
+function translateZ(vect: Vector3, dx: number, dy: number, dz: number): Vector3
 	return Vector3.new(
-		vect.X, vect.Y, 
+		vect.X + dx, 
+		vect.Y + dy, 
 		vect.Z + dz
 	)
 end
@@ -397,6 +387,8 @@ function applyMatrisToVector(matris: {number}, vect: Vector3): Vector3
 end
 
 --// Connections
+autoFixWindingOrder(VERTICIES, FACES)
+
 if conn then
 	conn:Disconnect()
 end
@@ -406,11 +398,13 @@ conn = runService.Heartbeat:Connect(function(dt: number)
 	local viewSpace = {}
 	local faceSorted = {}
 
-	local delta = getDelta()
+	local delta = userInputService:GetMouseDelta() --getDelta()
 
 	fov = math.clamp(fov, 70, 120)
-	angleY += delta.X * dt
-	angleX += delta.Y * dt
+	angleY += delta.X * dt --math.pi * dt --
+	angleX += delta.Y * dt --math.pi * dt --
+
+	--angleX = math.clamp(angleX, -3, 3)
 
 	local matrisX = createRotationMatrixX(angleX)
 	local matrisY = createRotationMatrixY(angleY)
@@ -420,7 +414,7 @@ conn = runService.Heartbeat:Connect(function(dt: number)
 
 	for i, v in VERTICIES do
 		local rotated = applyMatrisToVector(multipliedRotation, v)
-		local translated = translateZ(rotated, dz)
+		local translated = translateZ(rotated, dx, dy, dz)
 		local projected = project(translated)
 		local screened = screen(projected)
 
@@ -429,47 +423,50 @@ conn = runService.Heartbeat:Connect(function(dt: number)
 	end
 
 	--for i, edge in EDGES do
-	--local a = VERTICIES[edge[1]]
-	--local b = VERTICIES[edge[2]]
+	--local a = projectedVerticies[edge[1]]
+	--local b = projectedVerticies[edge[2]]
 
 	--line(
-	--screen(project(translateZ(rotateYZPlane(rotateXZPlane(a, angleY), -angleX), dz))),
-	--screen(project(translateZ(rotateYZPlane(rotateXZPlane(b, angleY), -angleX), dz)))
+	--a,
+	--b
 	--)
 	--end
 
 	for i, face in FACES do
 		local mainViewVertex = { viewSpace[face[1]], viewSpace[face[2]], viewSpace[face[3]], viewSpace[face[4]] }
 		local clippedVertexes = clipFaceAgainstNear(mainViewVertex)
-		local clippedVertexesScreen = {}
 
 		if #clippedVertexes < 3 then
 			continue
 		end
 
-		for i, v in clippedVertexes do
-			local fixed = screen(project(v))
-			table.insert(clippedVertexesScreen, fixed)
+		local clippedVertexesScreen = {}
+		for _, v in clippedVertexes do
+			table.insert(clippedVertexesScreen, screen(project(v)))
 		end
 
-		local vect1 = clippedVertexesScreen[1]
-		local vect2 = clippedVertexesScreen[2]
-		local vect3 = clippedVertexesScreen[3]
-
-		if isBack(vect1, vect2, vect3) then
+		if isBack(clippedVertexesScreen[1], clippedVertexesScreen[2], clippedVertexesScreen[3]) then
 			continue
 		end
 
-		local faceDepth = (clippedVertexes[1].Z + clippedVertexes[2].Z + clippedVertexes[3].Z + clippedVertexes[4].Z)
-			/ 4
+		local faceDepth = 0
+		for k = 1, #clippedVertexes do
+			faceDepth += clippedVertexes[k].Z
+		end
+		faceDepth = faceDepth / #clippedVertexes
 
-		table.insert(
-			faceSorted,
-			{ index = i, depth = faceDepth, color = FACE_COLORS[i], vertices = clippedVertexesScreen }
-		)
+		--clippedVertexes (for luminance) TODO HERE
+		-- L = (Nx, Ny, Nz) * LIGHT_DIRECTION
+
+		table.insert(faceSorted, {
+			index = i,
+			depth = faceDepth,
+			color = FACE_COLORS[i],
+			vertices = clippedVertexesScreen,
+		})
 	end
 
-	table.sort(faceSorted, function(a: { index: number, depth: number }, b: { index: number, depth: number })
+	table.sort(faceSorted, function(a, b)
 		return a.depth > b.depth
 	end)
 
@@ -478,12 +475,7 @@ conn = runService.Heartbeat:Connect(function(dt: number)
 		local depth = v.depth
 		local vertices = v.vertices
 
-		local vect1 = vertices[1]
-		local vect2 = vertices[2]
-		local vect3 = vertices[3]
-		local vect4 = vertices[4]
-
-		drawRect(vect1, vect2, vect3, vect4, depth, color)
+		drawRect(vertices, depth, color)
 	end
 end)
 
@@ -520,11 +512,9 @@ wheelConn1 = userInputService.InputChanged:Connect(function(input, gameProcessed
 		return
 	end
 
-	--[[
 	if input.Position.Z > 0 then
-		fov -= 5
+		dz += 0.1
 	else
-		fov += 5
+		dz -= 0.1
 	end
-	]]
 end)
