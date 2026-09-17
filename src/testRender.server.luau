@@ -32,7 +32,7 @@ const RECTANGLE_FILL_TYPE = Enum.ImageCombineType.Overwrite
 const LINE_ANTI_ALIASING = Enum.AntiAliasing.Enabled
 const FILL_COLOR = Color3.new(0, 0, 0)
 
-const LIGHT_DIRECTION = Vector3.new(0, 1, -1)
+const LIGHT_DIRECTION = Vector3.new(0, 1, -1).Unit
 const AMBIENT_LIGHT = 0.2
 
 const VERTICIES = {
@@ -100,6 +100,15 @@ function isBack(vect1: Vector2, vect2: Vector2, vect3: Vector2): boolean
 	local crossProduct = (vect2.X - vect1.X) * (vect3.Y - vect1.Y) - (vect2.Y - vect1.Y) * (vect3.X - vect1.X)
 
 	return (crossProduct <= 0)
+end
+
+function getSurfaceNormal(vect1: Vector3, vect2: Vector3, vect3: Vector3): Vector3
+	local edge1 = vect2 - vect1
+	local edge2 = vect3 - vect1
+
+	local normal = edge1:Cross(edge2)
+
+	return normal.Unit
 end
 
 function _writeColorToBuffer(buf: buffer, color: Color3, size: Vector2)
@@ -401,8 +410,8 @@ conn = runService.Heartbeat:Connect(function(dt: number)
 	local delta = userInputService:GetMouseDelta() --getDelta()
 
 	fov = math.clamp(fov, 70, 120)
-	angleY += delta.X * dt --math.pi * dt --
-	angleX += delta.Y * dt --math.pi * dt --
+	angleY += math.pi * dt --delta.X * dt --
+	angleX += math.pi * dt --delta.Y * dt --
 
 	--angleX = math.clamp(angleX, -3, 3)
 
@@ -455,14 +464,21 @@ conn = runService.Heartbeat:Connect(function(dt: number)
 		end
 		faceDepth = faceDepth / #clippedVertexes
 
-		--clippedVertexes (for luminance) TODO HERE
+		--clippedVertexes (for luminance)
 		-- L = (Nx, Ny, Nz) * LIGHT_DIRECTION
 		-- N = surface normal vector
+
+		local N = getSurfaceNormal(clippedVertexes[1], clippedVertexes[2], clippedVertexes[3])
+		local L = N:Dot(LIGHT_DIRECTION)
+		local luminance = math.max(AMBIENT_LIGHT, L)
+
+		local baseColor = FACE_COLORS[i]
+		local finalCalculateds = Color3.new(baseColor.R * luminance, baseColor.G * luminance, baseColor.B * luminance)
 
 		table.insert(faceSorted, {
 			index = i,
 			depth = faceDepth,
-			color = FACE_COLORS[i],
+			color = finalCalculateds,
 			vertices = clippedVertexesScreen,
 		})
 	end
