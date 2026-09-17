@@ -457,6 +457,7 @@ conn = runService.Heartbeat:Connect(function(dt: number)
 
 		--clippedVertexes (for luminance) TODO HERE
 		-- L = (Nx, Ny, Nz) * LIGHT_DIRECTION
+		-- N = surface normal vector
 
 		table.insert(faceSorted, {
 			index = i,
