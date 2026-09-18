@@ -9,7 +9,7 @@ local runService = game:GetService("RunService")
 local userInputService = game:GetService("UserInputService")
 
 --// Variables
-local imageLabel = starterGui:WaitForChild("render"):WaitForChild("ImageLabel")
+local imageLabel = starterGui:WaitForChild("render"):WaitForChild("ImageLabel") :: ImageLabel
 local editableImage = nil
 
 local dx, dy, dz = 0, 0, 1
@@ -27,7 +27,7 @@ local oldPos = userInputService:GetMouseLocation()
 local renderSurfaceNormals = false
 
 --// Constants
-const SIZE = Vector2.new(1861, 834)
+const SIZE = imageLabel.AbsoluteSize
 const NEAR_CLIPPING = 0.45
 
 const RECTANGLE_FILL_TYPE = Enum.ImageCombineType.Overwrite
