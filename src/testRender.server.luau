@@ -24,52 +24,69 @@ local wheelConn1 = nil
 
 local oldPos = userInputService:GetMouseLocation()
 
+local renderSurfaceNormals = false
+
 --// Constants
-const SIZE = Vector2.new(800, 800)
+const SIZE = Vector2.new(1861, 834)
 const NEAR_CLIPPING = 0.45
 
 const RECTANGLE_FILL_TYPE = Enum.ImageCombineType.Overwrite
 const LINE_ANTI_ALIASING = Enum.AntiAliasing.Enabled
-const FILL_COLOR = Color3.new(0, 0, 0)
+const FILL_COLOR = Color3.new(1, 1, 1)
 
 const LIGHT_DIRECTION = Vector3.new(0, 1, -1).Unit
-const AMBIENT_LIGHT = 0.2
+const AMBIENT_LIGHT = 0.35
 
-const VERTICIES = {
-	Vector3.new(0.25, 0.25, 0.25),
-	Vector3.new(-0.25, 0.25, 0.25),
-	Vector3.new(-0.25, -0.25, 0.25),
-	Vector3.new(0.25, -0.25, 0.25),
-	Vector3.new(0.25, 0.25, -0.25),
-	Vector3.new(-0.25, 0.25, -0.25),
-	Vector3.new(-0.25, -0.25, -0.25),
-	Vector3.new(0.25, -0.25, -0.25),
-}
+const INSIDE = 0 -- 0000
+const LEFT = 1 -- 0001
+const RIGHT = 2 -- 0010
+const BOTTOM = 4 -- 0100
+const TOP = 8 -- 1000
 
---stylua: ignore
-const _EDGES = {
-    { 1, 2 }, { 2, 3 }, { 3, 4 }, { 4, 1 },
-    { 5, 6 }, { 6, 7 }, { 7, 8 }, { 8, 5 },
-    { 1, 5 }, { 2, 6 }, { 3, 7 }, { 4, 8 },
-}
+--// Algoritmik Donut (Torus) Jeneratörü
+local function generateTorus(majorRadius: number, minorRadius: number, rings: number, segments: number, color: Color3)
+	local vertices = {}
+	local faces = {}
+	local colors = {}
 
-const FACES = {
-	{ 1, 2, 3, 4 },
-	{ 5, 8, 7, 6 },
-	{ 1, 5, 6, 2 },
-	{ 4, 3, 7, 8 },
-	{ 1, 4, 8, 5 },
-	{ 2, 6, 7, 3 },
-}
+	for i = 0, rings - 1 do
+		local theta = i * (math.pi * 2) / rings
+		local cosTheta = math.cos(theta)
+		local sinTheta = math.sin(theta)
 
-const FACE_COLORS = {
-	Color3.fromRGB(255, 0, 0),
-	Color3.fromRGB(255, 0, 255),
-	Color3.fromRGB(0, 0, 255),
-	Color3.fromRGB(0, 255, 0),
-	Color3.fromRGB(255, 255, 0),
-	Color3.fromRGB(200, 200, 200),
-}
+		for j = 0, segments - 1 do
+			local phi = j * (math.pi * 2) / segments
+			local cosPhi = math.cos(phi)
+			local sinPhi = math.sin(phi)
+
+			-- Donut yüzeyindeki X, Y, Z noktaları hesaplanıyor
+			local x = (majorRadius + minorRadius * cosPhi) * cosTheta
+			local y = minorRadius * sinPhi
+			local z = (majorRadius + minorRadius * cosPhi) * sinTheta
+
+			table.insert(vertices, Vector3.new(x, y, z))
+		end
+	end
+
+	for i = 0, rings - 1 do
+		for j = 0, segments - 1 do
+			local nextI = (i + 1) % rings
+			local nextJ = (j + 1) % segments
+
+			local a = (i * segments) + j + 1
+			local b = (nextI * segments) + j + 1
+			local c = (nextI * segments) + nextJ + 1
+			local d = (i * segments) + nextJ + 1
+
+			table.insert(faces, { a, d, c, b })
+			table.insert(colors, color)
+		end
+	end
+
+	return vertices, faces, colors
+end
+
+local VERTICIES, FACES, FACE_COLORS = generateTorus(0.5, 0.22, 64, 32, Color3.fromRGB(255, 105, 180))
 
 --// Functions
 function createEditableImage(): EditableImage?
@@ -103,6 +120,14 @@ function isBack(vect1: Vector2, vect2: Vector2, vect3: Vector2): boolean
 end
 
 function getSurfaceNormal(vect1: Vector3, vect2: Vector3, vect3: Vector3): Vector3
+	local edge1 = vect2 - vect1
+	local edge2 = vect3 - vect1
+
+	local normal = edge1:Cross(edge2)
+	return normal
+end
+
+function getSurfaceNormalUnit(vect1: Vector3, vect2: Vector3, vect3: Vector3): Vector3
 	local edge1 = vect2 - vect1
 	local edge2 = vect3 - vect1
 
@@ -184,12 +209,90 @@ function _point(pointVect: Vector2)
 	editableImage:DrawRectangle(Vector2.new(x, y), sizeVector2, FILL_COLOR, 0, RECTANGLE_FILL_TYPE)
 end
 
-function _line(pointVect1: Vector2, pointVect2: Vector2)
+-- used Chen-Sutherland algorithm:
+-- https://en.wikipedia.org/wiki/Cohen%E2%80%93Sutherland_algorithm
+function computeCode(x: number, y: number, xMax: number, yMax: number): number
+	local code = INSIDE
+
+	if x < 0 then
+		code = bit32.bor(code, LEFT)
+	elseif x > xMax then
+		code = bit32.bor(code, RIGHT)
+	end
+
+	if y < 0 then
+		code = bit32.bor(code, BOTTOM)
+	elseif y > yMax then
+		code = bit32.bor(code, TOP)
+	end
+
+	return code
+end
+
+-- used Chen-Sutherland algorithm:
+-- https://en.wikipedia.org/wiki/Cohen%E2%80%93Sutherland_algorithm
+function line(pointVect1: Vector2, pointVect2: Vector2)
 	if not editableImage then
 		return
 	end
 
-	editableImage:DrawLine(pointVect1, pointVect2, FILL_COLOR, 0, RECTANGLE_FILL_TYPE, LINE_ANTI_ALIASING)
+	local xMin, yMin = 0, 0
+	local xMax = editableImage.Size.X - 1
+	local yMax = editableImage.Size.Y - 1
+
+	local x1, y1 = pointVect1.X, pointVect1.Y
+	local x2, y2 = pointVect2.X, pointVect2.Y
+
+	local code1 = computeCode(x1, y1, xMax, yMax)
+	local code2 = computeCode(x2, y2, xMax, yMax)
+	local accept = false
+
+	while true do
+		if code1 == 0 and code2 == 0 then
+			accept = true
+			break
+		elseif bit32.band(code1, code2) ~= 0 then
+			break
+		else
+			local codeOut = if code1 ~= 0 then code1 else code2
+			local x, y = 0, 0
+
+			if bit32.band(codeOut, TOP) ~= 0 then
+				x = x1 + (x2 - x1) * (yMax - y1) / (y2 - y1)
+				y = yMax
+			elseif bit32.band(codeOut, BOTTOM) ~= 0 then
+				x = x1 + (x2 - x1) * (yMin - y1) / (y2 - y1)
+				y = yMin
+			elseif bit32.band(codeOut, RIGHT) ~= 0 then
+				y = y1 + (y2 - y1) * (xMax - x1) / (x2 - x1)
+				x = xMax
+			elseif bit32.band(codeOut, LEFT) ~= 0 then
+				y = y1 + (y2 - y1) * (xMin - x1) / (x2 - x1)
+				x = xMin
+			end
+
+			if codeOut == code1 then
+				x1, y1 = x, y
+				code1 = computeCode(x1, y1, xMax, yMax)
+			else
+				x2, y2 = x, y
+				code2 = computeCode(x2, y2, xMax, yMax)
+			end
+		end
+	end
+
+	if not accept then
+		return
+	end
+
+	editableImage:DrawLine(
+		Vector2.new(x1, y1),
+		Vector2.new(x2, y2),
+		FILL_COLOR,
+		0,
+		RECTANGLE_FILL_TYPE,
+		LINE_ANTI_ALIASING
+	)
 end
 
 function clipFaceAgainstNear(vertexList: { Vector3 }): { Vector3 }
@@ -260,7 +363,7 @@ function drawRect(vertices: { Vector2 }, faceDepth: number, color: Color3)
 		end
 	end
 
-	for scanY = minY, maxY do
+	for scanY = math.ceil(minY), math.floor(maxY) do
 		local interpolitied = {}
 
 		for k = 1, n do
@@ -315,10 +418,7 @@ function autoFixWindingOrder(vertices: { Vector3 }, faces: { { number } })
 		local v2 = vertices[face[2]]
 		local v3 = vertices[face[3]]
 
-		local edge1 = v2 - v1
-		local edge2 = v3 - v1
-		local normal = edge1:Cross(edge2)
-
+		local normal = getSurfaceNormal(v1, v2, v3)
 		local dirFromCenter = v1 - center
 
 		if normal:Dot(dirFromCenter) >= 0 then
@@ -396,7 +496,7 @@ function applyMatrisToVector(matris: {number}, vect: Vector3): Vector3
 end
 
 --// Connections
-autoFixWindingOrder(VERTICIES, FACES)
+--autoFixWindingOrder(VERTICIES, FACES)
 
 if conn then
 	conn:Disconnect()
@@ -411,7 +511,7 @@ conn = runService.Heartbeat:Connect(function(dt: number)
 
 	fov = math.clamp(fov, 70, 120)
 	angleY += math.pi * dt --delta.X * dt --
-	angleX += math.pi * dt --delta.Y * dt --
+	angleX += delta.Y * dt --math.pi * dt --
 
 	--angleX = math.clamp(angleX, -3, 3)
 
@@ -464,16 +564,37 @@ conn = runService.Heartbeat:Connect(function(dt: number)
 		end
 		faceDepth = faceDepth / #clippedVertexes
 
-		--clippedVertexes (for luminance)
+		-- clippedVertexes (for luminance)
 		-- L = (Nx, Ny, Nz) * LIGHT_DIRECTION
 		-- N = surface normal vector
 
-		local N = getSurfaceNormal(clippedVertexes[1], clippedVertexes[2], clippedVertexes[3])
-		local L = N:Dot(LIGHT_DIRECTION)
+		local vect1 = clippedVertexes[1]
+		local vect2 = clippedVertexes[2]
+		local vect3 = clippedVertexes[3]
+
+		local surfaceNormalUnit = getSurfaceNormalUnit(vect1, vect2, vect3)
+
+		local L = surfaceNormalUnit:Dot(LIGHT_DIRECTION)
 		local luminance = math.max(AMBIENT_LIGHT, L)
 
 		local baseColor = FACE_COLORS[i]
 		local finalCalculateds = Color3.new(baseColor.R * luminance, baseColor.G * luminance, baseColor.B * luminance)
+
+		local center3D = Vector3.new(0, 0, 0)
+		for _, v in clippedVertexes do
+			center3D += v
+		end
+		center3D /= #clippedVertexes
+
+		local lineLength = 0.5
+		local end3D = center3D + (surfaceNormalUnit * lineLength)
+
+		local startPos = screen(project(center3D))
+		local endPos = screen(project(end3D))
+
+		if renderSurfaceNormals then
+			line(startPos, endPos)
+		end
 
 		table.insert(faceSorted, {
 			index = i,
@@ -505,22 +626,24 @@ if wheelConn1 then
 end
 
 bindConn = userInputService.InputBegan:Connect(function(input: InputObject, gameProcessedEvent: boolean)
-	if input.KeyCode ~= Enum.KeyCode.R then
-		return
+	if input.KeyCode == Enum.KeyCode.V then
+		renderSurfaceNormals = not renderSurfaceNormals
 	end
 
-	setup()
+	if input.KeyCode == Enum.KeyCode.R then
+		setup()
 
-	if conn then
-		conn:Disconnect()
-	end
+		if conn then
+			conn:Disconnect()
+		end
 
-	if bindConn then
-		bindConn:Disconnect()
-	end
+		if bindConn then
+			bindConn:Disconnect()
+		end
 
-	if wheelConn1 then
-		wheelConn1:Disconnect()
+		if wheelConn1 then
+			wheelConn1:Disconnect()
+		end
 	end
 end)
 
