@@ -110,11 +110,6 @@ worth checking first before assuming something new is broken:
   API's limits. Guard both: skip near-horizontal edges explicitly, and clamp
   or reject scanline widths that exceed the canvas bounds rather than passing
   them straight to `DrawRectangle`.
-- **If a `table.sort` comparator throws a type error in `--!strict` mode**,
-  check that the comparator's parameter type annotation matches the actual
-  shape of the table being sorted exactly — including fields added later
-  (color, vertices, etc.), not just the fields that existed when the sort was
-  first written.
 - **When adding any new per-face computation (depth, color, etc.)**, remember
   that clipping can change the vertex count per face. Anything that assumes
   a fixed count (e.g. dividing a sum by a hardcoded 4) will silently misfire
