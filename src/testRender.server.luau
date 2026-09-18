@@ -80,7 +80,7 @@ function createTorus(mainRadius: number, tubeRadius: number, radSeg: number, tub
 	return vertices, faces, colors
 end
 
-local VERTICIES, FACES, FACE_COLORS = createTorus(0.2, 0.08, 16, 12)
+local VERTICIES, FACES, FACE_COLORS = createTorus(0.2, 0.08, 32, 24)
 local _EDGES = {}
 
 --// Functions
@@ -648,8 +648,8 @@ wheelConn1 = userInputService.InputChanged:Connect(function(input, gameProcessed
 	end
 
 	if input.Position.Z > 0 then
-		dz += 0.1
+		fov -= 5
 	else
-		dz -= 0.1
+		fov += 5
 	end
 end)
