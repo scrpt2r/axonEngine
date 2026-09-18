@@ -126,8 +126,7 @@ free.
 ## Status
 
 Early prototype. Core pipeline (transform → cull → clip → project → fill →
-sort → draw) is working end to end on both primitive shapes and loaded OBJ
-meshes, with basic lighting. Known correctness gaps remain around
+sort → draw) is working end to end on both primitive shapes, with basic lighting. Known correctness gaps remain around
 grazing-angle geometry and screen-space bounds (see Known issues). Expect
 frequent breaking changes as the architecture evolves — the plan is Z-buffer
 next, which will remove the painter's-algorithm sorting step entirely.
