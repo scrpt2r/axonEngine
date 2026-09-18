@@ -43,50 +43,45 @@ const RIGHT = 2 -- 0010
 const BOTTOM = 4 -- 0100
 const TOP = 8 -- 1000
 
---// Algoritmik Donut (Torus) Jeneratörü
-local function generateTorus(majorRadius: number, minorRadius: number, rings: number, segments: number, color: Color3)
+function createTorus(mainRadius: number, tubeRadius: number, radSeg: number, tubeSeg: number)
 	local vertices = {}
 	local faces = {}
 	local colors = {}
 
-	for i = 0, rings - 1 do
-		local theta = i * (math.pi * 2) / rings
-		local cosTheta = math.cos(theta)
-		local sinTheta = math.sin(theta)
+	for i = 0, radSeg do
+		local u = i / radSeg * math.pi * 2
+		local cosU = math.cos(u)
+		local sinU = math.sin(u)
 
-		for j = 0, segments - 1 do
-			local phi = j * (math.pi * 2) / segments
-			local cosPhi = math.cos(phi)
-			local sinPhi = math.sin(phi)
+		for j = 0, tubeSeg do
+			local v = j / tubeSeg * math.pi * 2
+			local cosV = math.cos(v)
+			local sinV = math.sin(v)
 
-			-- Donut yüzeyindeki X, Y, Z noktaları hesaplanıyor
-			local x = (majorRadius + minorRadius * cosPhi) * cosTheta
-			local y = minorRadius * sinPhi
-			local z = (majorRadius + minorRadius * cosPhi) * sinTheta
-
+			local x = (mainRadius + tubeRadius * cosV) * cosU
+			local y = tubeRadius * sinV
+			local z = (mainRadius + tubeRadius * cosV) * sinU
 			table.insert(vertices, Vector3.new(x, y, z))
 		end
 	end
 
-	for i = 0, rings - 1 do
-		for j = 0, segments - 1 do
-			local nextI = (i + 1) % rings
-			local nextJ = (j + 1) % segments
-
-			local a = (i * segments) + j + 1
-			local b = (nextI * segments) + j + 1
-			local c = (nextI * segments) + nextJ + 1
-			local d = (i * segments) + nextJ + 1
+	for i = 1, radSeg do
+		for j = 1, tubeSeg do
+			local a = (i - 1) * (tubeSeg + 1) + j
+			local b = i * (tubeSeg + 1) + j
+			local c = i * (tubeSeg + 1) + (j + 1)
+			local d = (i - 1) * (tubeSeg + 1) + (j + 1)
 
 			table.insert(faces, { a, d, c, b })
-			table.insert(colors, color)
+			table.insert(colors, Color3.new(0.2, 0.8, 0.4))
 		end
 	end
 
 	return vertices, faces, colors
 end
 
-local VERTICIES, FACES, FACE_COLORS = generateTorus(0.5, 0.22, 64, 32, Color3.fromRGB(255, 105, 180))
+local VERTICIES, FACES, FACE_COLORS = createTorus(0.2, 0.08, 16, 12)
+local _EDGES = {}
 
 --// Functions
 function createEditableImage(): EditableImage?
