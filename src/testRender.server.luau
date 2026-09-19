@@ -15,8 +15,12 @@ local editableImage = nil
 local dx, dy, dz = 0, 0, 1
 
 local fov = 70
+
 local angleY = 0
 local angleX = 0
+
+local frameCount = 0
+local accumTime = 0
 
 local conn = nil
 local bindConn = nil
@@ -27,7 +31,7 @@ local oldPos = userInputService:GetMouseLocation()
 local renderSurfaceNormals = false
 
 --// Constants
-const SIZE = imageLabel.AbsoluteSize
+const SIZE = imageLabel.AbsoluteSize / 1.5 --Vector2.new(800, 800) --
 const NEAR_CLIPPING = 0.45
 
 const RECTANGLE_FILL_TYPE = Enum.ImageCombineType.Overwrite
@@ -43,47 +47,273 @@ const RIGHT = 2 -- 0010
 const BOTTOM = 4 -- 0100
 const TOP = 8 -- 1000
 
-function createTorus(mainRadius: number, tubeRadius: number, radSeg: number, tubeSeg: number)
-	local vertices = {}
-	local faces = {}
-	local colors = {}
+const TAU = math.pi * 2
 
-	for i = 0, radSeg do
-		local u = i / radSeg * math.pi * 2
-		local cosU = math.cos(u)
-		local sinU = math.sin(u)
-
-		for j = 0, tubeSeg do
-			local v = j / tubeSeg * math.pi * 2
-			local cosV = math.cos(v)
-			local sinV = math.sin(v)
-
-			local x = (mainRadius + tubeRadius * cosV) * cosU
-			local y = tubeRadius * sinV
-			local z = (mainRadius + tubeRadius * cosV) * sinU
-			table.insert(vertices, Vector3.new(x, y, z))
-		end
-	end
-
-	for i = 1, radSeg do
-		for j = 1, tubeSeg do
-			local a = (i - 1) * (tubeSeg + 1) + j
-			local b = i * (tubeSeg + 1) + j
-			local c = i * (tubeSeg + 1) + (j + 1)
-			local d = (i - 1) * (tubeSeg + 1) + (j + 1)
-
-			table.insert(faces, { a, d, c, b })
-			table.insert(colors, Color3.new(0.2, 0.8, 0.4))
-		end
-	end
-
-	return vertices, faces, colors
-end
-
-local VERTICIES, FACES, FACE_COLORS = createTorus(0.2, 0.08, 32, 24)
-local _EDGES = {}
+--// Types
+type Builder = {
+	vertices: { Vector3 },
+	faces: { { number } },
+	colors: { Color3 },
+	lookup: { [string]: number },
+}
 
 --// Functions
+function hsv(h: number, s: number, v: number): Color3
+	return Color3.fromHSV(h % 1, s, v)
+end
+
+function newBuilder(): Builder
+	return { vertices = {}, faces = {}, colors = {}, lookup = {} }
+end
+
+function weld(b: Builder, p: Vector3): number
+	local key = math.floor(p.X * 10000 + 0.5)
+		.. "|"
+		.. math.floor(p.Y * 10000 + 0.5)
+		.. "|"
+		.. math.floor(p.Z * 10000 + 0.5)
+
+	local found = b.lookup[key]
+	if found then
+		return found
+	end
+
+	table.insert(b.vertices, p)
+	b.lookup[key] = #b.vertices
+	return #b.vertices
+end
+
+function addBoxFace(b: Builder, minCorner: { number }, size: { number }, axis: number, sign: number, color: Color3)
+	local t1 = (axis + 1) % 3
+	local t2 = (axis + 2) % 3
+
+	local function corner(d1: number, d2: number): number
+		local p = { minCorner[1], minCorner[2], minCorner[3] }
+
+		if sign > 0 then
+			p[axis + 1] += size[axis + 1]
+		end
+
+		p[t1 + 1] += size[t1 + 1] * d1
+		p[t2 + 1] += size[t2 + 1] * d2
+
+		return weld(b, Vector3.new(p[1], p[2], p[3]))
+	end
+
+	local c00 = corner(0, 0)
+	local c10 = corner(1, 0)
+	local c11 = corner(1, 1)
+	local c01 = corner(0, 1)
+
+	if sign > 0 then
+		table.insert(b.faces, { c00, c10, c11, c01 })
+	else
+		table.insert(b.faces, { c00, c01, c11, c10 })
+	end
+
+	table.insert(b.colors, color)
+end
+
+function generateMobius(
+	radius: number,
+	halfWidth: number,
+	segments: number,
+	widthSegments: number
+): ({ Vector3 }, { { number } }, { Color3 }, boolean)
+	local vertices: { Vector3 } = {}
+	local faces: { { number } } = {}
+	local colors: { Color3 } = {}
+
+	local columns = widthSegments + 1
+
+	for i = 0, segments - 1 do
+		local u = i * TAU / segments
+
+		for j = 0, widthSegments do
+			local v = -halfWidth + (2 * halfWidth) * j / widthSegments
+			local r = radius + v * math.cos(u / 2)
+
+			table.insert(vertices, Vector3.new(r * math.cos(u), v * math.sin(u / 2), r * math.sin(u)))
+		end
+	end
+
+	local function index(i: number, j: number): number
+		return i * columns + j + 1
+	end
+
+	for i = 0, segments - 1 do
+		local nextI = (i + 1) % segments
+		local isSeam = (i + 1 == segments)
+
+		for j = 0, widthSegments - 1 do
+			local jb, jc = j, j + 1
+
+			-- birleşim yerinde şerit yarım büküldüğü için "sağ-sol" yer değiştirir
+			if isSeam then
+				jb, jc = widthSegments - j, widthSegments - (j + 1)
+			end
+
+			table.insert(faces, { index(i, j), index(nextI, jb), index(nextI, jc), index(i, j + 1) })
+			table.insert(colors, hsv(i / segments, 0.75, if j % 2 == 0 then 1 else 0.8))
+		end
+	end
+
+	return vertices, faces, colors, true
+end
+
+function generateTrefoilKnot(
+	scale: number,
+	tubeRadius: number,
+	segments: number,
+	sides: number
+): ({ Vector3 }, { { number } }, { Color3 }, boolean)
+	local vertices: { Vector3 } = {}
+	local faces: { { number } } = {}
+	local colors: { Color3 } = {}
+
+	local up = Vector3.new(0, 1, 0)
+
+	for i = 0, segments - 1 do
+		local t = i * TAU / segments
+		local c2, s2 = math.cos(2 * t), math.sin(2 * t)
+		local c3, s3 = math.cos(3 * t), math.sin(3 * t)
+		local k = 2 + c3
+
+		local center = Vector3.new(k * c2, s3, k * s2) * scale
+		local tangent = Vector3.new(-3 * s3 * c2 - 2 * k * s2, 3 * c3, -3 * s3 * s2 + 2 * k * c2).Unit
+
+		local normal = (up - tangent * up:Dot(tangent)).Unit
+		local binormal = tangent:Cross(normal)
+
+		for j = 0, sides - 1 do
+			local phi = j * TAU / sides
+			table.insert(vertices, center + (normal * math.cos(phi) + binormal * math.sin(phi)) * tubeRadius)
+		end
+	end
+
+	for i = 0, segments - 1 do
+		local nextI = (i + 1) % segments
+
+		for j = 0, sides - 1 do
+			local nextJ = (j + 1) % sides
+
+			local a = i * sides + j + 1
+			local b = nextI * sides + j + 1
+			local c = nextI * sides + nextJ + 1
+			local d = i * sides + nextJ + 1
+
+			table.insert(faces, { a, d, c, b })
+			table.insert(colors, hsv(i / segments, 0.65, if (i + j) % 2 == 0 then 1 else 0.85))
+		end
+	end
+
+	return vertices, faces, colors, false
+end
+
+function generateVase(
+	height: number,
+	wall: number,
+	rings: number,
+	around: number
+): ({ Vector3 }, { { number } }, { Color3 }, boolean)
+	local vertices: { Vector3 } = {}
+	local faces: { { number } } = {}
+	local colors: { Color3 } = {}
+
+	local function outerRadius(t: number): number
+		return 0.16 + 0.22 * math.abs(math.sin(math.pi * t)) ^ 1.4 + 0.09 * t ^ 8
+	end
+
+	local thick = wall > 0
+
+	for k = 0, rings do
+		local t = k / rings
+		local y = height * (t - 0.5)
+		local r = outerRadius(t)
+
+		for i = 0, around - 1 do
+			local theta = i * TAU / around
+			table.insert(vertices, Vector3.new(r * math.cos(theta), y, r * math.sin(theta)))
+		end
+	end
+
+	local innerBase = (rings + 1) * around
+
+	if thick then
+		for k = 0, rings do
+			local t = k / rings
+			local y = height * (t - 0.5)
+			local r = outerRadius(t) - wall
+
+			for i = 0, around - 1 do
+				local theta = i * TAU / around
+				table.insert(vertices, Vector3.new(r * math.cos(theta), y, r * math.sin(theta)))
+			end
+		end
+	end
+
+	local function outer(k: number, i: number): number
+		return k * around + (i % around) + 1
+	end
+
+	local function inner(k: number, i: number): number
+		return innerBase + k * around + (i % around) + 1
+	end
+
+	for k = 0, rings - 1 do
+		local t = k / rings
+
+		for i = 0, around - 1 do
+			local shade = if (k + i) % 2 == 0 then 1 else 0.88
+
+			table.insert(faces, { outer(k, i), outer(k + 1, i), outer(k + 1, i + 1), outer(k, i + 1) })
+			table.insert(colors, hsv(0.04 + 0.05 * t, 0.65, shade))
+
+			if thick then
+				table.insert(faces, { inner(k, i), inner(k, i + 1), inner(k + 1, i + 1), inner(k + 1, i) })
+				table.insert(colors, hsv(0.58, 0.55, shade))
+			end
+		end
+	end
+
+	if thick then
+		for i = 0, around - 1 do
+			table.insert(faces, { outer(rings, i), inner(rings, i), inner(rings, i + 1), outer(rings, i + 1) })
+			table.insert(colors, Color3.fromRGB(235, 235, 235))
+
+			table.insert(faces, { outer(0, i), outer(0, i + 1), inner(0, i + 1), inner(0, i) })
+			table.insert(colors, Color3.fromRGB(140, 140, 140))
+		end
+	end
+
+	return vertices, faces, colors, not thick
+end
+
+function generateJack(length: number, thickness: number): ({ Vector3 }, { { number } }, { Color3 }, boolean)
+	local b = newBuilder()
+
+	local halves = {
+		{ length, thickness, thickness },
+		{ thickness, length, thickness },
+		{ thickness, thickness, length },
+	}
+	local palette = { hsv(0.0, 0.7, 1), hsv(0.33, 0.7, 1), hsv(0.6, 0.7, 1) }
+
+	for n = 1, 3 do
+		local h = halves[n]
+		local minCorner = { -h[1], -h[2], -h[3] }
+		local size = { 2 * h[1], 2 * h[2], 2 * h[3] }
+
+		for axis = 0, 2 do
+			addBoxFace(b, minCorner, size, axis, 1, palette[n])
+			addBoxFace(b, minCorner, size, axis, -1, palette[n])
+		end
+	end
+
+	return b.vertices, b.faces, b.colors, false
+end
+--// Test generatives end
+
 function createEditableImage(): EditableImage?
 	local succ, editableImage = pcall(function()
 		return assetService:CreateEditableImage({ Size = SIZE })
@@ -384,17 +614,20 @@ function drawRect(vertices: { Vector2 }, faceDepth: number, color: Color3)
 		local minInterpolate = math.min(table.unpack(interpolitied))
 		local maxInterpolate = math.max(table.unpack(interpolitied))
 
-		if maxInterpolate - minInterpolate <= 0 then
+		local x0 = math.round(minInterpolate)
+		local x1 = math.round(maxInterpolate)
+
+		if x1 - x0 <= 0 then
 			continue
 		end
 
-		local width = math.abs(maxInterpolate - minInterpolate)
+		local width = x1 - x0
 		if width < 1 then
 			width = 1
 		end
 
 		local maxAllowedX = math.max(SIZE.X - width, 0)
-		local safeX = math.clamp(minInterpolate, 0, maxAllowedX)
+		local safeX = math.clamp(x0, 0, maxAllowedX)
 		local safeY = math.clamp(scanY, 0, SIZE.Y - 1)
 
 		editableImage:DrawRectangle(Vector2.new(safeX, safeY), Vector2.new(width, 1), color, 0, RECTANGLE_FILL_TYPE)
@@ -491,6 +724,10 @@ function applyMatrisToVector(matris: {number}, vect: Vector3): Vector3
 end
 
 --// Connections
+--local VERTICIES, FACES, FACE_COLORS = generateTrefoilKnot(0.2, 0.1, 96, 8)
+local VERTICIES, FACES, FACE_COLORS = generateVase(1.1, 0.03, 16, 24)
+--local VERTICIES, FACES, FACE_COLORS = generateJack(0.65, 0.13)
+
 --autoFixWindingOrder(VERTICIES, FACES)
 
 if conn then
@@ -498,6 +735,20 @@ if conn then
 end
 
 conn = runService.Heartbeat:Connect(function(dt: number)
+	frameCount += 1
+	accumTime += dt
+
+	if accumTime >= 1 then
+		local avgFPS = math.floor(frameCount / accumTime)
+		local frameMs = (accumTime / frameCount) * 1000
+
+		print("fps:", avgFPS)
+		print("ms:", string.format("%.2f", frameMs))
+
+		frameCount = 0
+		accumTime = 0
+	end
+
 	local projectedVerticies = {}
 	local viewSpace = {}
 	local faceSorted = {}
@@ -594,14 +845,20 @@ conn = runService.Heartbeat:Connect(function(dt: number)
 		table.insert(faceSorted, {
 			index = i,
 			depth = faceDepth,
-			color = finalCalculateds,
+			color = finalCalculateds, ----,
 			vertices = clippedVertexesScreen,
 		})
 	end
 
-	table.sort(faceSorted, function(a, b)
-		return a.depth > b.depth
-	end)
+	table.sort(
+		faceSorted,
+		function(
+			a: { index: number, depth: number, color: Color3, vertices: { Vector2 } },
+			b: { index: number, depth: number, color: Color3, vertices: { Vector2 } }
+		)
+			return a.depth > b.depth
+		end
+	)
 
 	for i, v in faceSorted do
 		local color = v.color
@@ -623,6 +880,30 @@ end
 bindConn = userInputService.InputBegan:Connect(function(input: InputObject, gameProcessedEvent: boolean)
 	if input.KeyCode == Enum.KeyCode.V then
 		renderSurfaceNormals = not renderSurfaceNormals
+	end
+
+	if input.KeyCode == Enum.KeyCode.Z then
+		fov += 5
+	end
+
+	if input.KeyCode == Enum.KeyCode.X then
+		fov -= 5
+	end
+
+	if input.KeyCode == Enum.KeyCode.W then
+		dy += 0.1
+	end
+
+	if input.KeyCode == Enum.KeyCode.S then
+		dy -= 0.1
+	end
+
+	if input.KeyCode == Enum.KeyCode.A then
+		dx -= 0.1
+	end
+
+	if input.KeyCode == Enum.KeyCode.D then
+		dx += 0.1
 	end
 
 	if input.KeyCode == Enum.KeyCode.R then
@@ -648,8 +929,8 @@ wheelConn1 = userInputService.InputChanged:Connect(function(input, gameProcessed
 	end
 
 	if input.Position.Z > 0 then
-		fov -= 5
+		dz += 0.1
 	else
-		fov += 5
+		dz -= 0.1
 	end
 end)
