@@ -31,9 +31,6 @@ visibility, depth ordering, clipping, and rasterization.
   variable-length vertex list per clipped face)
 - Basic Lambertian lighting (face normal via cross product, dot product
   against a fixed light direction, with an ambient floor)
-- OBJ file loading (parses vertices and faces from `.obj` text data)
-- Automatic winding-order correction for loaded meshes (compares each face
-  normal against the direction from mesh center, flips if inward-facing)
 - 2D line clipping for debug overlays (Cohen-Sutherland), used for surface
   normal visualization
 
